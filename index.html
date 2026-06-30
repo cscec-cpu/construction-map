@@ -510,20 +510,20 @@
   const projects = [
     { name: "中信泰富项目", address: "上海市杨浦区平凉路486号", lng: 121.5340, lat: 31.2679 },
     { name: "上海金桥大厦", address: "上海市浦东新区金桥路1389号", lng: 121.5920, lat: 31.2648 },
-    { name: "焊接厂房项目", address: "上海市闵行区江川路822号" },
-    { name: "新阳半导体", address: "上海市松江区鼎源路300号" },
-    { name: "朱家角颜钛项目", address: "上海市青浦区康业路391号" },
-    { name: "陆家嘴三林项目", address: "上海市浦东新区沿江公路991号" },
-    { name: "西部粮库项目", address: "上海市奉贤区上海晨都文化传播有限公司附近" },
-    { name: "帝奥微项目", address: "上海市浦东新区北蔡镇镇中心路" },
-    { name: "空天装备项目", address: "上海市浦东新区东旭村东南601米" },
-    { name: "商飞项目", address: "上海市浦东新区上飞路912号" },
-    { name: "格科总部项目", address: "上海市浦东新区康南路复星凯特创新中心西" },
-    { name: "康方项目", address: "上海市浦东新区孙浦路199号" },
-    { name: "嘉华项目", address: "上海市徐汇区老沪闵路1311号" },
-    { name: "泰康三期项目", address: "上海市松江区广轩路298号" },
-    { name: "泰康浦园项目", address: "上海市闵行区陈行公路2934号" },
-    { name: "城投三林项目", address: "上海市浦东新区沿江公路990号" },
+    { name: "焊接厂房项目", address: "上海市闵行区江川路822号", lng: 121.420, lat: 31.015 },
+    { name: "新阳半导体", address: "上海市松江区鼎源路300号", lng: 121.245, lat: 31.035 },
+    { name: "朱家角颜钛项目", address: "上海市青浦区康业路391号", lng: 121.095, lat: 31.115 },
+    { name: "陆家嘴三林项目", address: "上海市浦东新区沿江公路991号", lng: 121.530, lat: 31.170 },
+    { name: "西部粮库项目", address: "上海市奉贤区上海晨都文化传播有限公司附近", lng: 121.468, lat: 30.925 },
+    { name: "帝奥微项目", address: "上海市浦东新区北蔡镇镇中心路", lng: 121.555, lat: 31.192 },
+    { name: "空天装备项目", address: "上海市浦东新区东旭村东南601米", lng: 121.635, lat: 31.225 },
+    { name: "商飞项目", address: "上海市浦东新区上飞路912号", lng: 121.755, lat: 31.108 },
+    { name: "格科总部项目", address: "上海市浦东新区康南路复星凯特创新中心西", lng: 121.585, lat: 31.135 },
+    { name: "康方项目", address: "上海市浦东新区孙浦路199号", lng: 121.635, lat: 31.152 },
+    { name: "嘉华项目", address: "上海市徐汇区老沪闵路1311号", lng: 121.432, lat: 31.132 },
+    { name: "泰康三期项目", address: "上海市松江区广轩路298号", lng: 121.215, lat: 31.048 },
+    { name: "泰康浦园项目", address: "上海市闵行区陈行公路2934号", lng: 121.525, lat: 31.095 },
+    { name: "城投三林项目", address: "上海市浦东新区沿江公路990号", lng: 121.528, lat: 31.168 },
   ];
 </script>
 
@@ -719,18 +719,21 @@ async function geocodeAll() {
       continue;
     }
 
-    // 尝试高德 Geocoder（需要 Web服务 API 权限）
+    // 尝试高德 Geocoder（需要 Web服务 API 权限，8秒超时）
     if (useGeocoder) {
       try {
-        const geoResult = await new Promise((resolve, reject) => {
-          geocoder.getLocation(proj.address, function(status, result) {
-            if (status === "complete" && result.info === "OK") {
-              resolve(result);
-            } else {
-              reject(new Error("Geocoding failed: " + (result.info || status)));
-            }
-          });
-        });
+        const geoResult = await Promise.race([
+          new Promise((resolve, reject) => {
+            geocoder.getLocation(proj.address, function(status, result) {
+              if (status === "complete" && result.info === "OK") {
+                resolve(result);
+              } else {
+                reject(new Error("Geocoding failed: " + (result.info || status)));
+              }
+            });
+          }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("超时")), 8000))
+        ]);
 
         const geocode = geoResult.geocodes[0];
         const lng = geocode.location.getLng();
