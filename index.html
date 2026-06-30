@@ -686,18 +686,23 @@ function initMap() {
 async function geocodeAll() {
   const overlay = document.getElementById("loadingOverlay");
   const loadingText = document.getElementById("loadingText");
+
+  try {
   const useGeocoder = !!geocoder; // 是否可以使用高德地理编码
 
   overlay.classList.remove("hidden");
-  loadingText.textContent = "正在编码项目地址… (0/" + projects.length + ")";
+  loadingText.textContent = "正在加载项目…";
 
   const cache = loadCache();
   const results = [];
   let successCount = 0;
 
+  // 快速通道：检查是否所有项目都自带坐标
+  const allHaveCoords = projects.every(p => p.lng !== undefined && p.lat !== undefined);
+
   for (let i = 0; i < projects.length; i++) {
     const proj = projects[i];
-    loadingText.textContent = "正在编码项目地址… (" + (i + 1) + "/" + projects.length + ") " + proj.name;
+    loadingText.textContent = "正在加载项目… (" + (i + 1) + "/" + projects.length + ") " + proj.name;
 
     // 优先使用项目自带的坐标
     if (proj.lng !== undefined && proj.lat !== undefined) {
@@ -764,9 +769,28 @@ async function geocodeAll() {
   document.getElementById("apiStatus").textContent = successCount === projects.length ? "✅ 就绪" : "⚠️ 部分失败";
   document.getElementById("apiStatus").className = successCount === projects.length ? "api-status ok" : "api-status warn";
 
+  console.log("📍 坐标处理完成:", successCount, "/", projects.length);
+
   // 渲染
-  window.geoResults = results;
-  renderAll(results);
+  try {
+    window.geoResults = results;
+    renderAll(results);
+    console.log("✅ 渲染完成");
+  } catch (e) {
+    console.error("❌ 渲染失败:", e);
+    document.getElementById("apiStatus").textContent = "❌ 渲染失败";
+    document.getElementById("apiStatus").className = "api-status err";
+    document.getElementById("mapTip").textContent = "渲染出错: " + e.message;
+  }
+
+  } catch (outerErr) {
+    console.error("❌ geocodeAll 异常:", outerErr);
+    document.getElementById("apiStatus").textContent = "❌ 异常";
+    document.getElementById("apiStatus").className = "api-status err";
+    document.getElementById("mapTip").textContent = "出错: " + outerErr.message;
+  } finally {
+    overlay.classList.add("hidden");
+  }
 }
 
 function sleep(ms) {
