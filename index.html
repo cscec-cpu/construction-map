@@ -1199,12 +1199,19 @@ function clearAllRouteOverlays() {
   try {
     if (distanceLine) { distanceLine.setMap(null); distanceLine = null; }
     if (distanceMidMarker) { distanceMidMarker.setMap(null); distanceMidMarker = null; }
-    // 扫描地图上所有 Polyline 并移除
+    // 扫描地图上所有覆盖物，移除路线相关的
     if (map && map.getAllOverlays) {
       var all = map.getAllOverlays();
       for (var i = all.length - 1; i >= 0; i--) {
-        if (all[i] && all[i].CLASS_NAME === "Overlay.Polyline") {
-          all[i].setMap(null);
+        var ov = all[i];
+        if (!ov) continue;
+        // 移除所有 Polyline（路线）
+        if (ov.CLASS_NAME === "Overlay.Polyline") {
+          ov.setMap(null);
+        }
+        // 移除 zIndex >= 200 的 Marker（距离标签），zIndex < 200 是项目标记
+        if (ov.CLASS_NAME === "Overlay.Marker" && ov.getzIndex && ov.getzIndex() >= 200) {
+          ov.setMap(null);
         }
       }
     }
