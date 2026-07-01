@@ -577,6 +577,7 @@ let selectedFirst = null;      // 选中的第一个标记索引
 let selectedSecond = null;     // 选中的第二个标记索引
 let distanceLine = null;       // 当前的测距连线
 let distanceMidMarker = null;  // 距离标签标记
+let drawRequestId = 0;         // 请求 ID，用于忽略过期回调
 let routeDistMatrix = {};      // 驾车距离矩阵缓存: { "i-j": distance_km }
 let routeCalcTotal = 0;        // 总共需要计算的路线对数
 let routeCalcDone = 0;         // 已完成的路线对数
@@ -1070,6 +1071,9 @@ function drawDistanceLine(validResults) {
   if (distanceLine) { distanceLine.setMap(null); distanceLine = null; }
   if (distanceMidMarker) { distanceMidMarker.setMap(null); distanceMidMarker = null; }
 
+  // 递增请求 ID，旧回调收到结果后会忽略
+  var reqId = ++drawRequestId;
+
   const p1 = validResults[selectedFirst];
   const p2 = validResults[selectedSecond];
   const straightDist = haversineDistance(p1.lng, p1.lat, p2.lng, p2.lat);
@@ -1093,6 +1097,8 @@ function drawDistanceLine(validResults) {
   fetch(url)
     .then(function(r) { return r.json(); })
     .then(function(result) {
+      // 忽略过期请求
+      if (reqId !== drawRequestId) return;
       if (result.status === "1" && result.route && result.route.paths && result.route.paths.length > 0) {
         var route = result.route.paths[0];
         var routeDist = route.distance / 1000;
@@ -1192,6 +1198,7 @@ function fallbackStraightLine(p1, p2, dist) {
 function clearSelection() {
   selectedFirst = null;
   selectedSecond = null;
+  drawRequestId++; // 使进行中的路线请求失效
   if (distanceLine) { distanceLine.setMap(null); distanceLine = null; }
   if (distanceMidMarker) { distanceMidMarker.setMap(null); distanceMidMarker = null; }
 
