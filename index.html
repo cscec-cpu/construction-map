@@ -1097,8 +1097,9 @@ function drawDistanceLine(validResults) {
   fetch(url)
     .then(function(r) { return r.json(); })
     .then(function(result) {
-      // 忽略过期请求
-      if (reqId !== drawRequestId) return;
+      // 双重保险：忽略过期请求或已清除的选择
+      if (reqId !== drawRequestId) { console.log("🛑 忽略过期路线请求"); return; }
+      if (selectedFirst === null || selectedSecond === null) { console.log("🛑 选择已清除，跳过绘制"); return; }
       if (result.status === "1" && result.route && result.route.paths && result.route.paths.length > 0) {
         var route = result.route.paths[0];
         var routeDist = route.distance / 1000;
