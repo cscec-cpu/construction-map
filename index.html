@@ -1067,9 +1067,8 @@ function updateMarkerAppearance(validResults) {
 }
 
 function drawDistanceLine(validResults) {
-  // 清除旧线
-  if (distanceLine) { distanceLine.setMap(null); distanceLine = null; }
-  if (distanceMidMarker) { distanceMidMarker.setMap(null); distanceMidMarker = null; }
+  // 彻底清除旧路线
+  clearAllRouteOverlays();
 
   // 递增请求 ID，旧回调收到结果后会忽略
   var reqId = ++drawRequestId;
@@ -1196,12 +1195,29 @@ function fallbackStraightLine(p1, p2, dist) {
   map.setFitView([distanceLine], false, [60, 60, 340, 120]);
 }
 
+function clearAllRouteOverlays() {
+  try {
+    if (distanceLine) { distanceLine.setMap(null); distanceLine = null; }
+    if (distanceMidMarker) { distanceMidMarker.setMap(null); distanceMidMarker = null; }
+    // 扫描地图上所有 Polyline 并移除
+    if (map && map.getAllOverlays) {
+      var all = map.getAllOverlays();
+      for (var i = all.length - 1; i >= 0; i--) {
+        if (all[i] && all[i].CLASS_NAME === "Overlay.Polyline") {
+          all[i].setMap(null);
+        }
+      }
+    }
+  } catch (e) { console.warn("清除路线异常:", e); }
+  distanceLine = null;
+  distanceMidMarker = null;
+}
+
 function clearSelection() {
   selectedFirst = null;
   selectedSecond = null;
   drawRequestId++; // 使进行中的路线请求失效
-  if (distanceLine) { distanceLine.setMap(null); distanceLine = null; }
-  if (distanceMidMarker) { distanceMidMarker.setMap(null); distanceMidMarker = null; }
+  clearAllRouteOverlays();
 
   if (window.validResults) {
     updateMarkerAppearance(window.validResults);
@@ -1213,6 +1229,7 @@ function clearSelection() {
   card.innerHTML = '<div class="value">请选择两个标记</div><div class="detail">在地图上或下方列表中选择</div>';
   document.getElementById("distanceActions").hidden = true;
   highlightListItems();
+  console.log("🧹 清除选择完成, drawRequestId=", drawRequestId);
 }
 
 function updateDistanceCard(validResults, straightDist, routeDist) {
