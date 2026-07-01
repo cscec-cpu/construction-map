@@ -696,37 +696,54 @@ async function calculateAllRouteDistances(validResults) {
   routeCalcRunning = true;
   updateMatrixPanel(false);
 
-  // 逐对计算，间隔 500ms 避免限流
+  // 如果 Driving API 不可用，前3次就会全部失败，快速跳过
+  let consecutiveFailures = 0;
+  const FAIL_FAST_LIMIT = 3;
+
   for (let k = 0; k < needed.length; k++) {
     const { i, j, key } = needed[k];
     const p1 = validResults[i];
     const p2 = validResults[j];
 
     try {
-      const dist = await new Promise((resolve, reject) => {
-        const origin = new AMap.LngLat(p1.lng, p1.lat);
-        const destination = new AMap.LngLat(p2.lng, p2.lat);
-        driving.search(origin, destination, function(status, result) {
-          if (status === "complete" && result.routes && result.routes.length > 0) {
-            resolve(result.routes[0].distance / 1000); // 米 -> 公里
-          } else {
-            reject(new Error("no route"));
-          }
-        });
-        // 8 秒超时
-        setTimeout(() => reject(new Error("timeout")), 8000);
-      });
-      routeDistMatrix[key] = Math.round(dist * 100) / 100; // 保留2位小数
+      const dist = await Promise.race([
+        new Promise((resolve, reject) => {
+          driving.search(new AMap.LngLat(p1.lng, p1.lat), new AMap.LngLat(p2.lng, p2.lat), function(status, result) {
+            if (status === "complete" && result.routes && result.routes.length > 0) {
+              resolve(result.routes[0].distance / 1000);
+            } else {
+              reject(new Error("no route: " + (result && result.info || status)));
+            }
+          });
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000))
+      ]);
+      routeDistMatrix[key] = Math.round(dist * 100) / 100;
+      consecutiveFailures = 0; // 重置
+      console.log("✅ 路线 " + (k+1) + "/" + needed.length + ": " + p1.project.name + " → " + p2.project.name + " = " + routeDistMatrix[key] + "km");
     } catch (e) {
-      // 失败时用直线距离 * 1.4 估算
+      consecutiveFailures++;
       const straightDist = haversineDistance(p1.lng, p1.lat, p2.lng, p2.lat);
-      routeDistMatrix[key] = Math.round(straightDist * 140) / 100; // 标记为估算
+      routeDistMatrix[key] = Math.round(straightDist * 140) / 100; // 估算值
+      console.warn("❌ 路线 " + (k+1) + "/" + needed.length + " 失败: " + e.message + " (连续失败 " + consecutiveFailures + ")");
     }
 
     routeCalcDone = k + 1;
     updateMatrixPanel(false);
 
-    // 限速：每次请求间隔 500ms
+    // 快速失败：连续3次失败，认为API不可用
+    if (consecutiveFailures >= FAIL_FAST_LIMIT) {
+      console.warn("⚠️ 连续 " + FAIL_FAST_LIMIT + " 次失败，驾车路线API可能不可用，跳过剩余计算");
+      // 剩余的全部用直线距离估算
+      for (let r = k + 1; r < needed.length; r++) {
+        const { i: ri, j: rj, key: rkey } = needed[r];
+        const sd = haversineDistance(validResults[ri].lng, validResults[ri].lat, validResults[rj].lng, validResults[rj].lat);
+        routeDistMatrix[rkey] = Math.round(sd * 140) / 100;
+      }
+      routeCalcDone = needed.length;
+      break;
+    }
+
     if (k < needed.length - 1) {
       await sleep(500);
     }
