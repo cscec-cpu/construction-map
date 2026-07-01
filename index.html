@@ -577,6 +577,7 @@ let selectedFirst = null;      // 选中的第一个标记索引
 let selectedSecond = null;     // 选中的第二个标记索引
 let distanceLine = null;       // 当前的测距连线
 let distanceMidMarker = null;  // 距离标签标记
+let routeOverlays = [];        // 追踪所有路线相关图层
 let drawRequestId = 0;         // 请求 ID，用于忽略过期回调
 let routeDistMatrix = {};      // 驾车距离矩阵缓存: { "i-j": distance_km }
 let routeCalcTotal = 0;        // 总共需要计算的路线对数
@@ -1197,23 +1198,19 @@ function fallbackStraightLine(p1, p2, dist) {
 
 function clearAllRouteOverlays() {
   try {
-    if (distanceLine) { distanceLine.setMap(null); distanceLine = null; }
-    if (distanceMidMarker) { distanceMidMarker.setMap(null); distanceMidMarker = null; }
-    // 扫描地图上所有覆盖物，移除路线相关的
-    if (map && map.getAllOverlays) {
-      var all = map.getAllOverlays();
-      for (var i = all.length - 1; i >= 0; i--) {
-        var ov = all[i];
-        if (!ov) continue;
-        // 移除所有 Polyline（路线）
-        if (ov.CLASS_NAME === "Overlay.Polyline") {
-          ov.setMap(null);
-        }
-        // 移除 zIndex >= 200 的 Marker（距离标签），zIndex < 200 是项目标记
-        if (ov.CLASS_NAME === "Overlay.Marker" && ov.getzIndex && ov.getzIndex() >= 200) {
-          ov.setMap(null);
-        }
-      }
+    // 保存项目标记的引用（它们需要保留在地图上）
+    var projectMarkers = [];
+    var valid = window.validResults || [];
+    for (var i = 0; i < valid.length; i++) {
+      if (valid[i].marker) projectMarkers.push(valid[i].marker);
+    }
+
+    // 清除地图上所有覆盖物
+    map.clearMap();
+
+    // 重新放回项目标记
+    for (var j = 0; j < projectMarkers.length; j++) {
+      projectMarkers[j].setMap(map);
     }
   } catch (e) { console.warn("清除路线异常:", e); }
   distanceLine = null;
