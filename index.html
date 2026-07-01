@@ -516,7 +516,7 @@
     { name: "陆家嘴三林项目", address: "上海市浦东新区沿江公路991号", lng: 121.530, lat: 31.170 },
     { name: "西部粮库项目", address: "上海市奉贤区上海晨都文化传播有限公司附近", lng: 121.468, lat: 30.925 },
     { name: "帝奥微项目", address: "上海市浦东新区北蔡镇镇中心路", lng: 121.555, lat: 31.192 },
-    { name: "空天装备项目", address: "上海市浦东新区东旭村东南601米", lng: 121.635, lat: 31.225 },
+    { name: "空天装备项目", address: "上海市浦东新区雪涛路与博艺路交叉口西60米", lng: 121.710, lat: 31.230 },
     { name: "商飞项目", address: "上海市浦东新区上飞路912号", lng: 121.755, lat: 31.108 },
     { name: "格科总部项目", address: "上海市浦东新区康南路复星凯特创新中心西", lng: 121.585, lat: 31.135 },
     { name: "康方项目", address: "上海市浦东新区孙浦路199号", lng: 121.635, lat: 31.152 },
@@ -524,6 +524,7 @@
     { name: "泰康三期项目", address: "上海市松江区广轩路298号", lng: 121.215, lat: 31.048 },
     { name: "泰康浦园项目", address: "上海市闵行区陈行公路2934号", lng: 121.525, lat: 31.095 },
     { name: "城投三林项目", address: "上海市浦东新区沿江公路990号", lng: 121.528, lat: 31.168 },
+    { name: "国网项目", address: "上海市奉贤区奉浦大道与环城西路交叉口", lng: 121.440, lat: 30.935 },
   ];
 </script>
 
@@ -539,7 +540,7 @@
   }
   // 安全 CSP 兼容的加载方式
   const script = document.createElement("script");
-  script.src = "https://webapi.amap.com/maps?v=2.0&key=" + encodeURIComponent(key) + "&plugin=AMap.Geocoder,AMap.GeometryUtil";
+  script.src = "https://webapi.amap.com/maps?v=2.0&key=" + encodeURIComponent(key) + "&plugin=AMap.Geocoder,AMap.GeometryUtil,AMap.Driving";
   script.onload = function() {
     console.log("✅ 高德地图 JS SDK 加载成功");
   };
@@ -571,6 +572,7 @@
 // 全局状态
 let map = null;
 let geocoder = null;
+let driving = null;            // 驾车路线规划
 let markers = [];               // { project, marker, lng, lat }
 let selectedFirst = null;      // 选中的第一个标记索引
 let selectedSecond = null;     // 选中的第二个标记索引
@@ -670,6 +672,15 @@ function initMap() {
   } catch (e) {
     console.warn("Geocoder 初始化失败，将跳过地址编码:", e);
     geocoder = null;
+  }
+
+  // 初始化驾车路线规划
+  try {
+    driving = new AMap.Driving({ policy: 0 }); // policy: 0 = 最快路线
+    console.log("✅ Driving 初始化成功");
+  } catch (e) {
+    console.warn("Driving 初始化失败，将使用直线距离:", e);
+    driving = null;
   }
 
   document.getElementById("apiStatus").textContent = "🗺️ 渲染中…";
@@ -900,11 +911,11 @@ function onMarkerClick(idx, validResults) {
     // 选第二个点
     selectedSecond = idx;
     updateMarkerAppearance(validResults);
-    drawDistanceLine(validResults);
-    updateDistanceCard(validResults);
+    updateDistanceCard(validResults, null, undefined); // 显示"查询中…"
+    drawDistanceLine(validResults); // 异步查询路线，完成后自动更新卡片
     highlightListItems();
     document.getElementById("mapTip").textContent =
-      "✅ 测距完成：" + validResults[selectedFirst].project.name + " ↔ " + r.project.name;
+      "🚗 正在查询驾车路线…";
     document.getElementById("distanceActions").hidden = false;
   }
 
@@ -931,40 +942,101 @@ function drawDistanceLine(validResults) {
 
   const p1 = validResults[selectedFirst];
   const p2 = validResults[selectedSecond];
-  const dist = haversineDistance(p1.lng, p1.lat, p2.lng, p2.lat);
+  const straightDist = haversineDistance(p1.lng, p1.lat, p2.lng, p2.lat);
 
-  // 绘制连线
+  // 使用驾车路线规划获取实际行驶距离
+  if (driving) {
+    const origin = new AMap.LngLat(p1.lng, p1.lat);
+    const destination = new AMap.LngLat(p2.lng, p2.lat);
+
+    driving.search(origin, destination, function(status, result) {
+      if (status === "complete" && result.routes && result.routes.length > 0) {
+        const route = result.routes[0];
+        const routeDist = route.distance / 1000; // 米转公里
+
+        // 绘制实际路线
+        const path = [];
+        const steps = route.steps;
+        for (let s = 0; s < steps.length; s++) {
+          const stepPath = steps[s].path;
+          for (let p = 0; p < stepPath.length; p++) {
+            path.push(stepPath[p]);
+          }
+        }
+
+        distanceLine = new AMap.Polyline({
+          path: path,
+          strokeColor: "#1a73e8",
+          strokeWeight: 5,
+          strokeOpacity: 0.7,
+          zIndex: 150,
+        });
+        distanceLine.setMap(map);
+
+        // 路线中点显示距离标签
+        const midIdx = Math.floor(path.length / 2);
+        const midPos = path[midIdx];
+        const routeText = routeDist >= 1 ? routeDist.toFixed(1) + " km" : (routeDist * 1000).toFixed(0) + " m";
+        distanceMidMarker = new AMap.Marker({
+          position: midPos,
+          content: '<div style="' +
+            'background:rgba(26,115,232,0.9);color:#fff;padding:4px 12px;border-radius:14px;' +
+            'font-size:13px;font-weight:600;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.2);' +
+            'border:2px solid #fff;' +
+            '">🚗 ' + routeText + '</div>',
+          anchor: "center",
+          zIndex: 200,
+        });
+        distanceMidMarker.setMap(map);
+
+        // 调整视野
+        map.setFitView([distanceLine], false, [60, 60, 340, 120]);
+
+        // 更新距离卡片
+        updateDistanceCard(validResults, straightDist, routeDist);
+      } else {
+        // 路线规划失败，回退到直线距离
+        console.warn("路线规划失败:", status, result);
+        fallbackStraightLine(p1, p2, straightDist);
+        updateDistanceCard(validResults, straightDist, null);
+      }
+    });
+  } else {
+    // 无 Driving 插件，使用直线
+    fallbackStraightLine(p1, p2, straightDist);
+    updateDistanceCard(validResults, straightDist, null);
+  }
+}
+
+function fallbackStraightLine(p1, p2, dist) {
   distanceLine = new AMap.Polyline({
     path: [
       new AMap.LngLat(p1.lng, p1.lat),
       new AMap.LngLat(p2.lng, p2.lat),
     ],
-    strokeColor: "#1a73e8",
+    strokeColor: "#999",
     strokeWeight: 3,
     strokeStyle: "dashed",
-    lineJoin: "round",
-    strokeOpacity: 0.8,
+    strokeOpacity: 0.6,
     zIndex: 150,
   });
   distanceLine.setMap(map);
 
-  // 在中点显示距离标签
   const midLng = (p1.lng + p2.lng) / 2;
   const midLat = (p1.lat + p2.lat) / 2;
   const distText = dist >= 1 ? dist.toFixed(2) + " km" : (dist * 1000).toFixed(0) + " m";
   distanceMidMarker = new AMap.Marker({
     position: new AMap.LngLat(midLng, midLat),
     content: '<div style="' +
-      'background:rgba(26,115,232,0.9);color:#fff;padding:4px 12px;border-radius:14px;' +
-      'font-size:13px;font-weight:600;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.2);' +
+      'background:rgba(153,153,153,0.85);color:#fff;padding:4px 12px;border-radius:14px;' +
+      'font-size:12px;font-weight:500;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.2);' +
       'border:2px solid #fff;' +
-      '">' + distText + '</div>',
+      '">📏 直线 ' + distText + '</div>',
     anchor: "center",
     zIndex: 200,
   });
   distanceMidMarker.setMap(map);
 
-  // 调整视野以包含两个点
   map.setFitView([distanceLine], false, [60, 60, 340, 120]);
 }
 
@@ -986,20 +1058,38 @@ function clearSelection() {
   highlightListItems();
 }
 
-function updateDistanceCard(validResults) {
+function updateDistanceCard(validResults, straightDist, routeDist) {
   if (selectedFirst === null || selectedSecond === null) return;
 
   const p1 = validResults[selectedFirst];
   const p2 = validResults[selectedSecond];
-  const dist = haversineDistance(p1.lng, p1.lat, p2.lng, p2.lat);
 
   const card = document.getElementById("distanceCard");
   card.classList.remove("placeholder");
-  const distText = dist >= 1 ? dist.toFixed(2) + " km" : (dist * 1000).toFixed(0) + " 米";
-  card.innerHTML =
-    '<div class="label">直线距离</div>' +
-    '<div class="value">' + distText + '</div>' +
-    '<div class="detail">' + p1.project.name + ' ↔ ' + p2.project.name + '</div>';
+
+  if (routeDist !== undefined && routeDist !== null) {
+    // 有路线距离
+    const routeText = routeDist >= 1 ? routeDist.toFixed(1) + " km" : (routeDist * 1000).toFixed(0) + " 米";
+    const straightText = straightDist >= 1 ? straightDist.toFixed(1) + " km" : (straightDist * 1000).toFixed(0) + " 米";
+    card.innerHTML =
+      '<div class="label">🚗 驾车路线距离</div>' +
+      '<div class="value">' + routeText + '</div>' +
+      '<div class="detail">' + p1.project.name + ' ↔ ' + p2.project.name +
+      ' &nbsp;|&nbsp; 直线: ' + straightText + '</div>';
+  } else if (routeDist === undefined) {
+    // 正在查询路线
+    card.innerHTML =
+      '<div class="label">🚗 正在查询路线…</div>' +
+      '<div class="value" style="font-size:16px;color:#f9ab00;">⏳ 请稍候</div>' +
+      '<div class="detail">' + p1.project.name + ' ↔ ' + p2.project.name + '</div>';
+  } else {
+    // 路线查询失败，只显示直线
+    const straightText = straightDist >= 1 ? straightDist.toFixed(2) + " km" : (straightDist * 1000).toFixed(0) + " 米";
+    card.innerHTML =
+      '<div class="label">📏 直线距离（驾车路线查询失败）</div>' +
+      '<div class="value">' + straightText + '</div>' +
+      '<div class="detail">' + p1.project.name + ' ↔ ' + p2.project.name + '</div>';
+  }
 }
 
 // ============================================================
