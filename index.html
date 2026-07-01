@@ -578,6 +578,10 @@ let selectedFirst = null;      // 选中的第一个标记索引
 let selectedSecond = null;     // 选中的第二个标记索引
 let distanceLine = null;       // 当前的测距连线
 let distanceMidMarker = null;  // 距离标签标记
+let routeDistMatrix = {};      // 驾车距离矩阵缓存: { "i-j": distance_km }
+let routeCalcTotal = 0;        // 总共需要计算的路线对数
+let routeCalcDone = 0;         // 已完成的路线对数
+let routeCalcRunning = false;  // 是否正在计算
 
 // ============================================================
 // 颜色方案：最多支持 30 个项目，循环使用
@@ -628,6 +632,128 @@ function haversineDistance(lng1, lat1, lng2, lat2) {
             Math.sin(dLng / 2) * Math.sin(dLng / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
+}
+
+// ============================================================
+// 驾车距离批量计算 + localStorage 缓存
+// ============================================================
+function getRouteCacheKey() {
+  // 根据项目名称列表生成唯一 key，项目变了自动失效
+  const names = projects.map(p => p.name + "|" + (p.lng||0).toFixed(2) + "," + (p.lat||0).toFixed(2)).sort().join("__");
+  return "routes_" + btoa(names).substring(0, 40);
+}
+
+function loadRouteCache() {
+  const key = getRouteCacheKey();
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) { return {}; }
+}
+
+function saveRouteCache(matrix) {
+  const key = getRouteCacheKey();
+  try {
+    localStorage.setItem(key, JSON.stringify(matrix));
+    console.log("💾 路线距离已缓存");
+  } catch (e) { console.warn("缓存存储失败:", e); }
+}
+
+async function calculateAllRouteDistances(validResults) {
+  if (routeCalcRunning) return;
+  if (!driving) {
+    console.warn("Driving 插件不可用，跳过路线计算");
+    updateMatrixPanel(false);
+    return;
+  }
+
+  const n = validResults.length;
+  if (n < 2) return;
+
+  // 检查缓存
+  routeDistMatrix = loadRouteCache();
+  const needed = [];
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const pairKey = i + "-" + j;
+      if (!(pairKey in routeDistMatrix)) {
+        needed.push({ i, j, key: pairKey });
+      }
+    }
+  }
+
+  routeCalcTotal = needed.length;
+  routeCalcDone = 0;
+
+  if (needed.length === 0) {
+    console.log("✅ 全部路线距离已缓存，共 " + Object.keys(routeDistMatrix).length + " 对");
+    updateMatrixPanel(true);
+    refreshMatrixTable(validResults);
+    return;
+  }
+
+  console.log("🚗 需要计算 " + needed.length + " 对驾车距离…");
+  routeCalcRunning = true;
+  updateMatrixPanel(false);
+
+  // 逐对计算，间隔 500ms 避免限流
+  for (let k = 0; k < needed.length; k++) {
+    const { i, j, key } = needed[k];
+    const p1 = validResults[i];
+    const p2 = validResults[j];
+
+    try {
+      const dist = await new Promise((resolve, reject) => {
+        const origin = new AMap.LngLat(p1.lng, p1.lat);
+        const destination = new AMap.LngLat(p2.lng, p2.lat);
+        driving.search(origin, destination, function(status, result) {
+          if (status === "complete" && result.routes && result.routes.length > 0) {
+            resolve(result.routes[0].distance / 1000); // 米 -> 公里
+          } else {
+            reject(new Error("no route"));
+          }
+        });
+        // 8 秒超时
+        setTimeout(() => reject(new Error("timeout")), 8000);
+      });
+      routeDistMatrix[key] = Math.round(dist * 100) / 100; // 保留2位小数
+    } catch (e) {
+      // 失败时用直线距离 * 1.4 估算
+      const straightDist = haversineDistance(p1.lng, p1.lat, p2.lng, p2.lat);
+      routeDistMatrix[key] = Math.round(straightDist * 140) / 100; // 标记为估算
+    }
+
+    routeCalcDone = k + 1;
+    updateMatrixPanel(false);
+
+    // 限速：每次请求间隔 500ms
+    if (k < needed.length - 1) {
+      await sleep(500);
+    }
+  }
+
+  routeCalcRunning = false;
+  saveRouteCache(routeDistMatrix);
+  updateMatrixPanel(true);
+  refreshMatrixTable(validResults);
+  console.log("✅ 驾车距离计算完成: " + routeCalcDone + "/" + routeCalcTotal);
+}
+
+function updateMatrixPanel(complete) {
+  const toggle = document.getElementById("panelToggle");
+  if (!complete && routeCalcRunning) {
+    toggle.innerHTML = '📊 项目距离矩阵 — 正在计算驾车路线… (' + routeCalcDone + '/' + routeCalcTotal + ') <span class="arrow">▼</span>';
+  } else if (complete && routeDistMatrix && Object.keys(routeDistMatrix).length > 0) {
+    toggle.innerHTML = '📊 项目距离矩阵 — 🚗驾车距离 <span class="arrow">▼</span>';
+  } else {
+    toggle.innerHTML = '📊 项目距离矩阵 — 📏直线距离 <span class="arrow">▼</span>';
+  }
+}
+
+function refreshMatrixTable(validResults) {
+  // 重新渲染矩阵表格
+  const allResults = window.geoResults || [];
+  renderMatrix(allResults);
 }
 
 // ============================================================
@@ -862,6 +988,11 @@ function renderAll(results) {
       // 不做处理，因为 marker click 已经处理了
     }, 50);
   });
+
+  // 后台批量计算驾车距离
+  setTimeout(function() {
+    calculateAllRouteDistances(validResults);
+  }, 500);
 }
 
 function createMarkerContent(idx, color) {
@@ -944,7 +1075,16 @@ function drawDistanceLine(validResults) {
   const p2 = validResults[selectedSecond];
   const straightDist = haversineDistance(p1.lng, p1.lat, p2.lng, p2.lat);
 
-  // 使用驾车路线规划获取实际行驶距离
+  // 检查缓存中是否有驾车距离
+  const pairKey = Math.min(selectedFirst, selectedSecond) + "-" + Math.max(selectedFirst, selectedSecond);
+  const cachedRouteDist = routeDistMatrix[pairKey];
+
+  // 如果有缓存，立即更新距离卡片
+  if (cachedRouteDist !== undefined) {
+    updateDistanceCard(validResults, straightDist, cachedRouteDist);
+  }
+
+  // 使用驾车路线规划获取路径绘制
   if (driving) {
     const origin = new AMap.LngLat(p1.lng, p1.lat);
     const destination = new AMap.LngLat(p2.lng, p2.lat);
@@ -952,7 +1092,14 @@ function drawDistanceLine(validResults) {
     driving.search(origin, destination, function(status, result) {
       if (status === "complete" && result.routes && result.routes.length > 0) {
         const route = result.routes[0];
-        const routeDist = route.distance / 1000; // 米转公里
+        const routeDist = route.distance / 1000;
+
+        // 如果和缓存不同，更新缓存和卡片
+        if (Math.abs(routeDist - (cachedRouteDist || 0)) > 0.1) {
+          routeDistMatrix[pairKey] = Math.round(routeDist * 100) / 100;
+          saveRouteCache(routeDistMatrix);
+          updateDistanceCard(validResults, straightDist, routeDist);
+        }
 
         // 绘制实际路线
         const path = [];
@@ -989,22 +1136,20 @@ function drawDistanceLine(validResults) {
         });
         distanceMidMarker.setMap(map);
 
-        // 调整视野
         map.setFitView([distanceLine], false, [60, 60, 340, 120]);
-
-        // 更新距离卡片
-        updateDistanceCard(validResults, straightDist, routeDist);
       } else {
-        // 路线规划失败，回退到直线距离
-        console.warn("路线规划失败:", status, result);
+        console.warn("路线规划失败:", status);
         fallbackStraightLine(p1, p2, straightDist);
-        updateDistanceCard(validResults, straightDist, null);
+        if (cachedRouteDist === undefined) {
+          updateDistanceCard(validResults, straightDist, null);
+        }
       }
     });
   } else {
-    // 无 Driving 插件，使用直线
     fallbackStraightLine(p1, p2, straightDist);
-    updateDistanceCard(validResults, straightDist, null);
+    if (cachedRouteDist === undefined) {
+      updateDistanceCard(validResults, straightDist, null);
+    }
   }
 }
 
@@ -1281,19 +1426,27 @@ function renderMatrix(results) {
     return;
   }
 
-  // 构建距离矩阵
+  // 构建距离矩阵（优先使用驾车距离）
   const n = validResults.length;
+  const useRoute = routeDistMatrix && Object.keys(routeDistMatrix).length > 0;
   const matrix = [];
+  const estimated = {}; // 记录哪些是估算值
   for (let i = 0; i < n; i++) {
     matrix[i] = [];
     for (let j = 0; j < n; j++) {
       if (i === j) {
         matrix[i][j] = null;
       } else {
-        matrix[i][j] = haversineDistance(
-          validResults[i].lng, validResults[i].lat,
-          validResults[j].lng, validResults[j].lat
-        );
+        const pairKey = Math.min(i, j) + "-" + Math.max(i, j);
+        if (useRoute && routeDistMatrix[pairKey] !== undefined) {
+          matrix[i][j] = routeDistMatrix[pairKey];
+          estimated[pairKey] = (routeDistMatrix[pairKey] % 1 === 0 && routeDistMatrix[pairKey] > 0) ? false : !!(routeDistMatrix[pairKey] > 100 || (routeDistMatrix[pairKey] * 10) % 10 > 0); // rough check
+        } else {
+          matrix[i][j] = haversineDistance(
+            validResults[i].lng, validResults[i].lat,
+            validResults[j].lng, validResults[j].lat
+          );
+        }
       }
     }
   }
@@ -1324,7 +1477,9 @@ function renderMatrix(results) {
       } else {
         const d = matrix[i][j];
         const cls = d === minDist ? "cell-near" : (d === maxDist ? "cell-far" : "");
-        html += '<td class="' + cls + '">' + formatDist(d) + '</td>';
+        const pairKey = Math.min(i, j) + "-" + Math.max(i, j);
+        const isEstimate = estimated[pairKey];
+        html += '<td class="' + cls + '">' + formatDist(d) + (isEstimate ? '*' : '') + '</td>';
       }
     }
     html += '</tr>';
@@ -1333,9 +1488,12 @@ function renderMatrix(results) {
 
   // 图例
   if (n > 2) {
+    const label = useRoute ? '🚗 驾车距离' : '📏 直线距离';
     html += '<div style="margin-top:10px;font-size:11px;color:#80868b;display:flex;gap:16px;">' +
+      '<span>' + label + '</span>' +
       '<span>🟢 最近: ' + formatDist(minDist) + '</span>' +
       '<span>🔴 最远: ' + formatDist(maxDist) + '</span>' +
+      (useRoute ? '<span style="color:#f9ab00;">* 估算值</span>' : '') +
       '</div>';
   }
 
