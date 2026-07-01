@@ -540,7 +540,7 @@
   }
   // 安全 CSP 兼容的加载方式
   const script = document.createElement("script");
-  script.src = "https://webapi.amap.com/maps?v=2.0&key=" + encodeURIComponent(key) + "&plugin=AMap.Geocoder,AMap.GeometryUtil,AMap.Driving";
+  script.src = "https://webapi.amap.com/maps?v=2.0&key=" + encodeURIComponent(key) + "&plugin=AMap.Geocoder,AMap.GeometryUtil";
   script.onload = function() {
     console.log("✅ 高德地图 JS SDK 加载成功");
   };
@@ -572,7 +572,6 @@
 // 全局状态
 let map = null;
 let geocoder = null;
-let driving = null;            // 驾车路线规划
 let markers = [];               // { project, marker, lng, lat }
 let selectedFirst = null;      // 选中的第一个标记索引
 let selectedSecond = null;     // 选中的第二个标记索引
@@ -661,12 +660,6 @@ function saveRouteCache(matrix) {
 
 async function calculateAllRouteDistances(validResults) {
   if (routeCalcRunning) return;
-  if (!driving) {
-    console.warn("Driving 插件不可用，跳过路线计算");
-    updateMatrixPanel(false);
-    return;
-  }
-
   const n = validResults.length;
   if (n < 2) return;
 
@@ -706,18 +699,16 @@ async function calculateAllRouteDistances(validResults) {
     const p2 = validResults[j];
 
     try {
-      const dist = await Promise.race([
-        new Promise((resolve, reject) => {
-          driving.search(new AMap.LngLat(p1.lng, p1.lat), new AMap.LngLat(p2.lng, p2.lat), function(status, result) {
-            if (status === "complete" && result.routes && result.routes.length > 0) {
-              resolve(result.routes[0].distance / 1000);
-            } else {
-              reject(new Error("no route: " + (result && result.info || status)));
-            }
-          });
-        }),
+      const url = "https://restapi.amap.com/v3/direction/driving?" +
+        "key=" + AMAP_KEY +
+        "&origin=" + p1.lng + "," + p1.lat +
+        "&destination=" + p2.lng + "," + p2.lat +
+        "&strategy=0";
+      const resp = await Promise.race([
+        fetch(url).then(r => r.json()),
         new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000))
       ]);
+      const dist = resp.route.paths[0].distance / 1000;
       routeDistMatrix[key] = Math.round(dist * 100) / 100;
       consecutiveFailures = 0; // 重置
       console.log("✅ 路线 " + (k+1) + "/" + needed.length + ": " + p1.project.name + " → " + p2.project.name + " = " + routeDistMatrix[key] + "km");
@@ -815,15 +806,6 @@ function initMap() {
   } catch (e) {
     console.warn("Geocoder 初始化失败，将跳过地址编码:", e);
     geocoder = null;
-  }
-
-  // 初始化驾车路线规划
-  try {
-    driving = new AMap.Driving({ policy: 0 }); // policy: 0 = 最快路线
-    console.log("✅ Driving 初始化成功");
-  } catch (e) {
-    console.warn("Driving 初始化失败，将使用直线距离:", e);
-    driving = null;
   }
 
   document.getElementById("apiStatus").textContent = "🗺️ 渲染中…";
@@ -1101,30 +1083,29 @@ function drawDistanceLine(validResults) {
     updateDistanceCard(validResults, straightDist, cachedRouteDist);
   }
 
-  // 使用驾车路线规划获取路径绘制
-  if (driving) {
-    const origin = new AMap.LngLat(p1.lng, p1.lat);
-    const destination = new AMap.LngLat(p2.lng, p2.lat);
+  // 使用 REST API 获取驾车路线路径
+  const url = "https://restapi.amap.com/v3/direction/driving?" +
+    "key=" + AMAP_KEY +
+    "&origin=" + p1.lng + "," + p1.lat +
+    "&destination=" + p2.lng + "," + p2.lat +
+    "&strategy=0";
 
-    driving.search(origin, destination, function(status, result) {
-      if (status === "complete" && result.routes && result.routes.length > 0) {
-        const route = result.routes[0];
-        const routeDist = route.distance / 1000;
+  fetch(url)
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
+      if (result.status === "1" && result.route && result.route.paths && result.route.paths.length > 0) {
+        var route = result.route.paths[0];
+        var routeDist = route.distance / 1000;
 
-        // 如果和缓存不同，更新缓存和卡片
-        if (Math.abs(routeDist - (cachedRouteDist || 0)) > 0.1) {
-          routeDistMatrix[pairKey] = Math.round(routeDist * 100) / 100;
-          saveRouteCache(routeDistMatrix);
-          updateDistanceCard(validResults, straightDist, routeDist);
-        }
-
-        // 绘制实际路线
-        const path = [];
-        const steps = route.steps;
-        for (let s = 0; s < steps.length; s++) {
-          const stepPath = steps[s].path;
-          for (let p = 0; p < stepPath.length; p++) {
-            path.push(stepPath[p]);
+        // 解析 REST API 的 polyline 字符串
+        var path = [];
+        var steps = route.steps;
+        for (var s = 0; s < steps.length; s++) {
+          var polyline = steps[s].polyline;
+          var points = polyline.split(";");
+          for (var p = 0; p < points.length; p++) {
+            var xy = points[p].split(",");
+            path.push(new AMap.LngLat(parseFloat(xy[0]), parseFloat(xy[1])));
           }
         }
 
@@ -1154,20 +1135,26 @@ function drawDistanceLine(validResults) {
         distanceMidMarker.setMap(map);
 
         map.setFitView([distanceLine], false, [60, 60, 340, 120]);
+
+        // 更新缓存和卡片
+        routeDistMatrix[pairKey] = Math.round(routeDist * 100) / 100;
+        saveRouteCache(routeDistMatrix);
+        updateDistanceCard(validResults, straightDist, routeDist);
       } else {
-        console.warn("路线规划失败:", status);
+        console.warn("路线规划失败:", result.info);
         fallbackStraightLine(p1, p2, straightDist);
         if (cachedRouteDist === undefined) {
           updateDistanceCard(validResults, straightDist, null);
         }
       }
+    })
+    .catch(function(e) {
+      console.warn("路线规划请求失败:", e);
+      fallbackStraightLine(p1, p2, straightDist);
+      if (cachedRouteDist === undefined) {
+        updateDistanceCard(validResults, straightDist, null);
+      }
     });
-  } else {
-    fallbackStraightLine(p1, p2, straightDist);
-    if (cachedRouteDist === undefined) {
-      updateDistanceCard(validResults, straightDist, null);
-    }
-  }
 }
 
 function fallbackStraightLine(p1, p2, dist) {
