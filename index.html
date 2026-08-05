@@ -479,6 +479,18 @@
   <div class="stats">
     <span>共 <strong id="projectCount">0</strong> 个项目</span>
     <span class="api-status warn" id="apiStatus">⏳ 正在初始化…</span>
+    <button class="btn" onclick="exportCoords()" style="color:#fff;border-color:rgba(255,255,255,0.4);background:rgba(255,255,255,0.15);">📋 导出坐标</button>
+  </div>
+</div>
+<!-- 导出结果弹窗 -->
+<div id="exportModal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;padding:24px;max-width:700px;max-height:70vh;overflow:auto;margin:20px;">
+    <h3 style="margin:0 0 12px;">📋 当前所有项目坐标</h3>
+    <textarea id="exportText" readonly style="width:100%;height:250px;font-family:monospace;font-size:12px;border:1px solid #ddd;border-radius:6px;padding:10px;"></textarea>
+    <div style="display:flex;gap:8px;margin-top:12px;justify-content:flex-end;">
+      <button class="btn" onclick="document.getElementById('exportModal').style.display='none'">关闭</button>
+      <button class="btn primary" onclick="navigator.clipboard.writeText(document.getElementById('exportText').value);alert('已复制到剪贴板！');">📝 复制全部</button>
+    </div>
   </div>
 </div>
 
@@ -557,27 +569,27 @@
   //    name: 项目名称, address: 详细地址
   // ============================================================
   const projects = [
-    { name: "中信泰富项目", address: "上海市杨浦区平凉路486号", lng: 121.5340, lat: 31.2679 },
-    { name: "上海金桥大厦", address: "上海市浦东新区金桥路1389号", lng: 121.5920, lat: 31.2648 },
-    { name: "焊接厂房项目", address: "上海市闵行区江川路822号", lng: 121.420, lat: 31.015 },
-    { name: "新阳半导体", address: "上海市松江区鼎源路300号", lng: 121.245, lat: 31.035 },
-    { name: "朱家角颜钛项目", address: "上海市青浦区康业路391号", lng: 121.095, lat: 31.115 },
-    { name: "陆家嘴三林项目", address: "上海市浦东新区沿江公路991号", lng: 121.530, lat: 31.170 },
-    { name: "西部粮库项目", address: "上海市奉贤区上海晨都文化传播有限公司附近", lng: 121.468, lat: 30.925 },
-    { name: "帝奥微项目", address: "上海市浦东新区北蔡镇镇中心路", lng: 121.555, lat: 31.192 },
-    { name: "空天装备项目", address: "上海市浦东新区雪涛路与博艺路交叉口西60米", lng: 121.710, lat: 31.230 },
-    { name: "商飞项目", address: "上海市浦东新区上飞路912号", lng: 121.755, lat: 31.108 },
-    { name: "格科总部项目", address: "上海市浦东新区康南路复星凯特创新中心西", lng: 121.585, lat: 31.135 },
-    { name: "康方项目", address: "上海市浦东新区孙浦路199号", lng: 121.635, lat: 31.152 },
-    { name: "嘉华项目", address: "上海市徐汇区老沪闵路1311号", lng: 121.432, lat: 31.132 },
-    { name: "泰康三期项目", address: "上海市松江区广轩路298号", lng: 121.215, lat: 31.048 },
-    { name: "泰康浦园项目", address: "上海市闵行区陈行公路2934号", lng: 121.525, lat: 31.095 },
-    { name: "城投三林项目", address: "上海市浦东新区沿江公路990号", lng: 121.528, lat: 31.168 },
-    { name: "国网项目", address: "上海市奉贤区奉浦大道与环城西路交叉口", lng: 121.440, lat: 30.935 },
-    { name: "华为光罩", address: "上海市浦东新区新场镇古博路与良虹路交叉口华力二期东门", lng: 121.600, lat: 31.140 },
-    { name: "宝山华润", address: "中建三局宝山华润项目部", lng: 121.420, lat: 31.310 },
-    { name: "中船项目", address: "上海市黄浦区高雄路185号望江苑", lng: 121.496, lat: 31.202 },
-    { name: "金山新阳项目", address: "上海市奉贤区育工路53号", lng: 121.370, lat: 30.850 },
+    { name: "中信泰富项目", address: "上海市杨浦区平凉路486号", lng: 121.5220, lat: 31.2562 },
+    { name: "上海金桥大厦", address: "上海市浦东新区金桥路1389号", lng: 121.5875, lat: 31.2539 },
+    { name: "焊接厂房项目", address: "上海市闵行区江川路822号", lng: 121.3964, lat: 31.0003 },
+    { name: "新阳半导体", address: "上海市松江区鼎源路300号", lng: 121.1701, lat: 31.0235 },
+    { name: "朱家角颜钛项目", address: "上海市青浦区康业路391号", lng: 121.0645, lat: 31.0858 },
+    { name: "陆家嘴三林项目", address: "上海市浦东新区沿江公路991号", lng: 121.4690, lat: 31.1405 },
+    { name: "西部粮库项目", address: "上海市奉贤区上海晨都文化传播有限公司附近", lng: 121.3795, lat: 30.9555 },
+    { name: "帝奥微项目", address: "上海市浦东新区北蔡镇镇中心路", lng: 121.5758, lat: 31.1710 },
+    { name: "空天装备项目", address: "上海市浦东新区雪涛路与博艺路交叉口西60米", lng: 121.9131, lat: 30.9439 },
+    { name: "商飞项目", address: "上海市浦东新区上飞路912号", lng: 121.8477, lat: 31.0990 },
+    { name: "格科总部项目", address: "上海市浦东新区康南路复星凯特创新中心西", lng: 121.6114, lat: 31.1620 },
+    { name: "康方项目", address: "上海市浦东新区孙浦路199号", lng: 121.6538, lat: 31.1904 },
+    { name: "嘉华项目", address: "上海市徐汇区老沪闵路1311号", lng: 121.4287, lat: 31.1458 },
+    { name: "泰康三期项目", address: "上海市松江区广轩路298号", lng: 121.2159, lat: 31.0648 },
+    { name: "泰康浦园项目", address: "上海市闵行区陈行公路2934号", lng: 121.4970, lat: 31.0908 },
+    { name: "城投三林项目", address: "上海市浦东新区沿江公路990号", lng: 121.5280, lat: 31.1680 },
+    { name: "国网项目", address: "上海市奉贤区奉浦大道与环城西路交叉口", lng: 121.4395, lat: 30.9378 },
+    { name: "华为光罩", address: "上海市浦东新区新场镇古博路与良虹路交叉口华力二期东门", lng: 121.6175, lat: 31.0782 },
+    { name: "宝山华润", address: "中建三局宝山华润项目部", lng: 121.3762, lat: 31.3029 },
+    { name: "中船项目", address: "上海市黄浦区高雄路185号望江苑", lng: 121.4889, lat: 31.1972 },
+    { name: "金山新阳项目", address: "上海市奉贤区育工路53号", lng: 121.4633, lat: 30.8092 },
   ];
 </script>
 
@@ -1602,6 +1614,19 @@ function toggleAllMarkers(show) {
 // 暴露到全局
 window.toggleAllMarkers = toggleAllMarkers;
 window.updateVisibleCount = updateVisibleCount;
+
+function exportCoords() {
+  var valid = window.validResults || [];
+  var lines = [];
+  lines.push("共 " + valid.length + " 个项目:\n");
+  for (var i = 0; i < valid.length; i++) {
+    var r = valid[i];
+    lines.push("{ name: \"" + r.project.name + "\", address: \"" + r.project.address + "\", lng: " + r.lng.toFixed(4) + ", lat: " + r.lat.toFixed(4) + " },");
+  }
+  document.getElementById("exportText").value = lines.join("\n");
+  document.getElementById("exportModal").style.display = "flex";
+}
+window.exportCoords = exportCoords;
 
 function highlightListItems() {
   const items = document.querySelectorAll(".project-item");
