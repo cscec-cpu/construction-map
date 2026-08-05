@@ -729,7 +729,7 @@ function saveRouteCache(matrix) {
 // 坐标修正：保存用户拖动后的精确坐标
 // ============================================================
 function getCoordCacheKey() {
-  return "coord_fix_v2";
+  return "coord_fix_v3"; // 更换 key 使旧缓存失效
 }
 
 function loadSavedCoords() {
