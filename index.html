@@ -1133,18 +1133,8 @@ function renderAll(results) {
     return;
   }
 
-  // 加载已保存的修正坐标
-  const savedCoords = loadSavedCoords();
-
-  // 创建标记
+  // 创建标记（使用代码中硬编码的精确坐标）
   validResults.forEach((r, idx) => {
-    // 如果有已保存的修正坐标，使用修正后的
-    const coordKey = r.project.name + "|" + r.project.address;
-    if (savedCoords[coordKey]) {
-      r.lng = savedCoords[coordKey].lng;
-      r.lat = savedCoords[coordKey].lat;
-    }
-
     const color = COLORS[idx % COLORS.length];
     const markerContent = createMarkerContent(idx, color);
     const marker = new AMap.Marker({
