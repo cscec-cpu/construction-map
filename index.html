@@ -664,6 +664,30 @@ function saveRouteCache(matrix) {
   } catch (e) { console.warn("缓存存储失败:", e); }
 }
 
+// ============================================================
+// 坐标修正：保存用户拖动后的精确坐标
+// ============================================================
+function getCoordCacheKey() {
+  return "coord_fix_v2";
+}
+
+function loadSavedCoords() {
+  try {
+    var raw = localStorage.getItem(getCoordCacheKey());
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) { return {}; }
+}
+
+function saveCoordCorrection(projResult) {
+  var saved = loadSavedCoords();
+  var key = projResult.project.name + "|" + projResult.project.address;
+  saved[key] = { lng: projResult.lng, lat: projResult.lat };
+  try {
+    localStorage.setItem(getCoordCacheKey(), JSON.stringify(saved));
+    console.log("💾 坐标已保存:", key, projResult.lng, projResult.lat);
+  } catch (e) { console.warn("坐标保存失败:", e); }
+}
+
 async function calculateAllRouteDistances(validResults) {
   if (routeCalcRunning) return;
   const n = validResults.length;
@@ -952,8 +976,18 @@ function renderAll(results) {
     return;
   }
 
+  // 加载已保存的修正坐标
+  const savedCoords = loadSavedCoords();
+
   // 创建标记
   validResults.forEach((r, idx) => {
+    // 如果有已保存的修正坐标，使用修正后的
+    const coordKey = r.project.name + "|" + r.project.address;
+    if (savedCoords[coordKey]) {
+      r.lng = savedCoords[coordKey].lng;
+      r.lat = savedCoords[coordKey].lat;
+    }
+
     const color = COLORS[idx % COLORS.length];
     const markerContent = createMarkerContent(idx, color);
     const marker = new AMap.Marker({
@@ -962,11 +996,26 @@ function renderAll(results) {
       anchor: "bottom-center",
       offset: new AMap.Pixel(0, -5),
       zIndex: 100 + idx,
+      draggable: true, // 允许拖动标记来修正位置
     });
 
     // 点击事件
     marker.on("click", function() {
       onMarkerClick(idx, validResults);
+    });
+
+    // 拖动结束后保存新坐标
+    marker.on("dragend", function(e) {
+      var newLng = e.lnglat.getLng();
+      var newLat = e.lnglat.getLat();
+      r.lng = newLng;
+      r.lat = newLat;
+      saveCoordCorrection(r);
+      // 清除距离缓存（因为坐标变了）
+      localStorage.removeItem(getRouteCacheKey());
+      routeDistMatrix = {};
+      document.getElementById("mapTip").textContent = "📍 " + r.project.name + " 坐标已更新: " + newLng.toFixed(4) + ", " + newLat.toFixed(4) + "（距离缓存已重置，刷新后重新计算）";
+      console.log("📍 坐标已修正:", r.project.name, newLng.toFixed(4), newLat.toFixed(4));
     });
 
     marker.setMap(map);
@@ -976,6 +1025,7 @@ function renderAll(results) {
 
   // 自适应视野
   map.setFitView(null, false, [60, 60, 340, 120]);
+  document.getElementById("mapTip").textContent = "💡 点击标记测距 | 按住标记拖动可修正位置";
 
   // 渲染项目列表和矩阵
   window.validResults = validResults;
