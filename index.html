@@ -73,6 +73,49 @@
     height: 100%;
   }
 
+  /* 地图搜索框 */
+  .map-search {
+    position: absolute;
+    top: 12px;
+    left: 60px;
+    z-index: 150;
+    width: 280px;
+  }
+  .map-search input {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+    outline: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    background: #fff;
+    transition: border-color 0.2s;
+  }
+  .map-search input:focus { border-color: #1a73e8; box-shadow: 0 2px 12px rgba(26,115,232,0.25); }
+  .search-results {
+    display: none;
+    background: #fff;
+    border-radius: 0 0 8px 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    max-height: 240px;
+    overflow-y: auto;
+    margin-top: 2px;
+  }
+  .search-results.active { display: block; }
+  .search-results .result-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    font-size: 13px;
+    border-bottom: 1px solid #f0f0f0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .search-results .result-item:hover { background: #e8f0fe; }
+  .search-results .result-item .ri-name { font-weight: 500; color: #202124; }
+  .search-results .result-item .ri-addr { font-size: 11px; color: #80868b; margin-left: auto; }
+
   /* 地图上的浮动提示 */
   .map-tip {
     position: absolute;
@@ -443,6 +486,11 @@
   <!-- 地图 -->
   <div class="map-wrapper">
     <div id="map"></div>
+    <!-- 地图搜索框 -->
+    <div class="map-search" id="mapSearch">
+      <input type="text" id="searchInput" placeholder="🔍 搜索地点…" autocomplete="off" />
+      <div class="search-results" id="searchResults"></div>
+    </div>
     <div class="map-tip" id="mapTip">💡 点击地图上的标记选择起/终点进行测距</div>
   </div>
 
@@ -544,7 +592,7 @@
   }
   // 安全 CSP 兼容的加载方式
   const script = document.createElement("script");
-  script.src = "https://webapi.amap.com/maps?v=2.0&key=" + encodeURIComponent(key) + "&plugin=AMap.Geocoder,AMap.GeometryUtil";
+  script.src = "https://webapi.amap.com/maps?v=2.0&key=" + encodeURIComponent(key) + "&plugin=AMap.Geocoder,AMap.GeometryUtil,AMap.PlaceSearch";
   script.onload = function() {
     console.log("✅ 高德地图 JS SDK 加载成功");
   };
@@ -844,6 +892,102 @@ function initMap() {
 
   // 开始地理编码
   geocodeAll();
+
+  // 初始化地图搜索
+  initMapSearch();
+}
+
+// ============================================================
+// 地图搜索功能
+// ============================================================
+function initMapSearch() {
+  var searchInput = document.getElementById("searchInput");
+  var searchResults = document.getElementById("searchResults");
+  var placeSearch = null;
+  var searchTimer = null;
+
+  try {
+    placeSearch = new AMap.PlaceSearch({
+      pageSize: 8,
+      pageIndex: 1,
+      city: "上海",
+      map: map,
+      panel: null,
+    });
+  } catch (e) {
+    console.warn("PlaceSearch 初始化失败:", e);
+    searchInput.placeholder = "搜索不可用";
+    searchInput.disabled = true;
+    return;
+  }
+
+  searchInput.addEventListener("input", function() {
+    var keyword = this.value.trim();
+    if (!keyword) {
+      searchResults.classList.remove("active");
+      searchResults.innerHTML = "";
+      return;
+    }
+
+    // 300ms 防抖
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(function() {
+      placeSearch.search(keyword, function(status, result) {
+        if (status === "complete" && result.poiList && result.poiList.pois) {
+          var pois = result.poiList.pois;
+          var html = "";
+          for (var i = 0; i < pois.length; i++) {
+            var poi = pois[i];
+            html += '<div class="result-item" data-lng="' + poi.location.lng + '" data-lat="' + poi.location.lat + '" data-name="' + escapeHtml(poi.name) + '">' +
+              '<span>📍</span>' +
+              '<span class="ri-name">' + escapeHtml(poi.name) + '</span>' +
+              '<span class="ri-addr">' + escapeHtml(truncate(poi.address || poi.pname + poi.cityname + poi.adname, 16)) + '</span>' +
+              '</div>';
+          }
+          searchResults.innerHTML = html;
+          searchResults.classList.add("active");
+
+          // 点击搜索结果
+          var items = searchResults.querySelectorAll(".result-item");
+          for (var j = 0; j < items.length; j++) {
+            items[j].addEventListener("click", function() {
+              var lng = parseFloat(this.dataset.lng);
+              var lat = parseFloat(this.dataset.lat);
+              var name = this.dataset.name;
+              map.setZoomAndCenter(15, [lng, lat]);
+              // 添加临时标记
+              if (window._searchMarker) { window._searchMarker.setMap(null); }
+              window._searchMarker = new AMap.Marker({
+                position: new AMap.LngLat(lng, lat),
+                content: '<div style="background:#ea4335;color:#fff;padding:4px 10px;border-radius:14px;font-size:12px;font-weight:600;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.3);border:2px solid #fff;">📍 ' + escapeHtml(name) + '</div>',
+                anchor: "bottom-center",
+                offset: new AMap.Pixel(0, -10),
+                zIndex: 300,
+              });
+              window._searchMarker.setMap(map);
+              searchResults.classList.remove("active");
+              searchInput.value = name;
+            });
+          }
+        } else {
+          searchResults.innerHTML = '<div style="padding:12px;color:#80868b;text-align:center;">未找到结果</div>';
+          searchResults.classList.add("active");
+        }
+      });
+    }, 300);
+  });
+
+  // 点击地图空白区域关闭搜索结果
+  map.on("click", function() {
+    searchResults.classList.remove("active");
+  });
+
+  // 点击搜索框外部关闭结果
+  document.addEventListener("click", function(e) {
+    if (!document.getElementById("mapSearch").contains(e.target)) {
+      searchResults.classList.remove("active");
+    }
+  });
 }
 
 // ============================================================
